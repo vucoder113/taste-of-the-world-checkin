@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Đăng nhập | Taste of the World</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <a class="brand" href="/">
+      <span class="brand-mark">T</span>
+      <span><strong>TASTE OF THE WORLD</strong><small>Guest intelligence</small></span>
+    </a>
+    <p class="eyebrow">BÁO CÁO SỰ KIỆN</p>
+    <h1>Đăng nhập</h1>
+    <p class="login-description">Nhập mật khẩu để xem báo cáo khách mời.</p>
+    {% if error %}<p class="login-error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post">
+      <label for="password">Mật khẩu</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+      <button class="button button-primary" type="submit">Vào báo cáo</button>
+    </form>
+  </main>
+</body>
+</html>

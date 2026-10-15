@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Báo cáo khách mời | Taste of the World</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark">T</span>
+      <span><strong>TASTE OF THE WORLD</strong><small>Guest intelligence</small></span>
+    </a>
+    <div class="header-actions">
+      <span class="header-caption">BÁO CÁO SỰ KIỆN</span>
+      {% if auth_required %}
+      <form method="post" action="{{ url_for('logout') }}">
+        <button class="button button-outline logout-button" type="submit">Đăng xuất</button>
+      </form>
+      {% endif %}
+    </div>
+  </header>
+  <main class="shell">
+    <section class="intro">
+      <div>
+        <p class="eyebrow">DASHBOARD · HÀ NỘI</p>
+        <h1>Khách mời &amp; check-in</h1>
+        <p class="subhead">Theo dõi đăng ký, check-in và hiệu quả mời khách của đội ngũ.</p>
+      </div>
+      <form id="upload-form" class="upload-box">
+        <input id="excel-file" type="file" accept=".xlsx" multiple hidden>
+        <button class="button button-primary" id="choose-file" type="button">
+          <span aria-hidden="true">↑</span> Chọn 4 file Excel
+        </button>
+        <span id="upload-name" class="upload-hint">Đăng ký · chiều · tiệc tối · chỉ tiêu</span>
+      </form>
+    </section>
+
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section id="empty-state" class="empty-state">
+      <div class="empty-icon">↥</div>
+      <h2>Chưa có dữ liệu báo cáo</h2>
+      <p>Chọn 4 file Excel riêng: danh sách đăng ký, danh sách check-in buổi chiều, khách mời tiệc tối và chỉ tiêu nhân viên.</p>
+      <button class="button button-outline" id="empty-choose" type="button">Chọn 4 file Excel</button>
+    </section>
+
+    <div id="dashboard" hidden>
+      <section class="metrics" aria-label="Tổng quan">
+        <article class="metric-card"><span>TỔNG NHÂN VIÊN</span><strong id="metric-employees">0</strong><small>Trong danh sách target</small></article>
+        <article class="metric-card"><span>ĐĂNG KÝ THAM DỰ</span><strong id="metric-registered">0</strong><small>Dòng trong danh sách đăng ký</small></article>
+        <article class="metric-card"><span>CHECK-IN BUỔI CHIỀU</span><strong id="metric-afternoon">0</strong><small>Khách trong file đều đã check-in</small></article>
+        <article class="metric-card"><span>KHÁCH MỜI TIỆC TỐI</span><strong id="metric-dinner-invited">0</strong><small>Cộng theo cột SL khách</small></article>
+        <article class="metric-card metric-accent"><span>CHECK-IN TIỆC TỐI</span><strong id="metric-dinner">0</strong><small>Chỉ tính dòng được đánh dấu</small></article>
+      </section>
+
+      <section id="source-summary" class="source-summary" aria-label="Kiểm tra nguồn dữ liệu"></section>
+      <div id="report-warnings" class="report-warnings" role="status" hidden></div>
+
+      <section class="panel chart-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">PHÂN TÍCH KHÁCH &amp; CHECK-IN</p><h2 id="chart-title">Check-in tiệc tối</h2></div>
+          <div class="filters">
+            <label>Sheet dữ liệu<select id="chart-category">
+              <option value="dinner">Check-in tiệc tối</option>
+              <option value="dinner_invited">Khách mời tiệc tối</option>
+              <option value="afternoon">Check-in buổi chiều</option>
+              <option value="registered">Đăng ký tham dự</option>
+            </select></label>
+            <label>Phân loại<select id="vip-filter">
+              <option value="all">Tất cả khách</option>
+              <option value="vip">VIP</option>
+              <option value="non_vip">Không VIP</option>
+              <option value="unclassified">Chưa phân loại VIP</option>
+            </select></label>
+            <label>Người mời<select id="inviter-filter"><option value="all">Tất cả nhân viên</option></select></label>
+          </div>
+        </div>
+        <div class="chart-legend"><span><i class="legend-vip"></i>VIP</span><span><i class="legend-normal"></i>Không VIP</span><span><i class="legend-unclassified"></i>Chưa phân loại</span><strong id="chart-total">0 khách</strong></div>
+        <div id="chart" class="chart" role="img" aria-label="Biểu đồ số khách theo người mời"></div>
+        <p id="chart-attribution" class="chart-attribution" hidden></p>
+        <p id="chart-empty" class="chart-empty" hidden>Không có khách phù hợp với bộ lọc.</p>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="panel-heading table-heading">
+          <div><p class="eyebrow">HIỆU QUẢ ĐỘI NGŨ</p><h2>Tổng hợp theo nhân viên</h2></div>
+          <label class="search-box"><span>⌕</span><input id="employee-search" type="search" placeholder="Tìm nhân viên..." aria-label="Tìm nhân viên"></label>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>NHÂN VIÊN</th><th>CHỨC VỤ</th><th>PHÒNG BAN</th><th>TARGET</th><th>ĐĂNG KÝ</th><th>CHECK-IN CHIỀU</th><th>MỜI TIỆC TỐI</th><th>CHECK-IN TỐI</th><th title="(Check-in chiều + check-in tối) / max(đăng ký, target)">TỶ LỆ THAM DỰ</th></tr></thead>
+          <tbody id="employee-rows"></tbody>
+        </table></div>
+        <p class="table-note">Bảng được nhóm theo phòng ban. Tỷ lệ tham dự = (check-in chiều + check-in tối) / mẫu số; mẫu số là Target nếu số đăng ký thấp hơn Target, nếu không thì dùng số đăng ký. Bí danh chỉ được quy đổi khi khớp duy nhất một nhân viên theo tên hoặc chức vụ; phần chưa xác định nằm ở dòng “Chưa đối chiếu Target”.</p>
+      </section>
+      <p class="privacy-note">Dữ liệu được xử lý trong bộ nhớ của phiên chạy hiện tại.</p>
+    </div>
+  </main>
+
+  <dialog id="detail-dialog" class="detail-dialog">
+    <div class="detail-header">
+      <div><p class="eyebrow">HỒ SƠ NHÂN VIÊN</p><h2 id="detail-name">Chi tiết khách hàng</h2><p id="detail-meta"></p></div>
+      <button class="close-button" id="close-detail" type="button" aria-label="Đóng">×</button>
+    </div>
+    <div class="detail-summary" id="detail-summary"></div>
+    <p class="detail-note">Dấu ✓ cho biết khách có xuất hiện trong danh sách tương ứng (đối chiếu bằng số điện thoại/email; chỉ dùng tên duy nhất khi thông tin liên hệ không mâu thuẫn). Các số ở trên là thống kê theo người mời ghi trong từng file.</p>
+    <div class="detail-table-wrap"><table>
+      <thead><tr><th>KHÁCH / NHÓM KHÁCH</th><th>MÃ KH</th><th>ĐIỆN THOẠI</th><th>NGUỒN</th><th>SL KHÁCH</th><th>VIP</th><th>CÓ TRONG DS ĐĂNG KÝ</th><th>CHECK-IN CHIỀU</th><th>CÓ TRONG DS TIỆC TỐI</th><th>CHECK-IN TỐI</th><th>DỮ LIỆU GỐC</th></tr></thead>
+      <tbody id="guest-rows"></tbody>
+    </table></div>
+  </dialog>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
