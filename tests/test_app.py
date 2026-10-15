@@ -1,6 +1,7 @@
 import io
+import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from openpyxl import Workbook
 
@@ -193,6 +194,71 @@ class ReportAppTests(unittest.TestCase):
     def test_report_endpoint_requires_upload(self):
         response = self.client.get("/api/report")
         self.assertEqual(response.status_code, 404)
+
+    def test_report_endpoint_reads_persisted_report(self):
+        expected = {"totals": {"employees": 1}}
+        with (
+            patch.object(report_app, "DATABASE_URL", "postgresql://test"),
+            patch.object(report_app, "read_persisted_report", return_value=expected) as read_report,
+        ):
+            response = self.client.get("/api/report")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["report"], expected)
+        read_report.assert_called_once_with()
+
+    def test_persisted_report_storage_uses_private_schema_and_tls(self):
+        report = {"guest": "Khách Một"}
+        connection = MagicMock()
+        connection_context = MagicMock()
+        connection_context.__enter__.return_value = connection
+        with (
+            patch.object(report_app, "DATABASE_URL", "postgresql://test"),
+            patch.object(report_app.psycopg, "connect", return_value=connection_context) as connect,
+        ):
+            report_app.write_persisted_report(report)
+
+        connect.assert_called_once_with(
+            "postgresql://test", connect_timeout=10, sslmode="require"
+        )
+        statements = [call.args[0] for call in connection.execute.call_args_list]
+        self.assertTrue(any("CREATE SCHEMA IF NOT EXISTS app_private" in sql for sql in statements))
+        self.assertTrue(any("ENABLE ROW LEVEL SECURITY" in sql for sql in statements))
+        self.assertTrue(any("REVOKE ALL ON SCHEMA app_private FROM PUBLIC" in sql for sql in statements))
+        self.assertEqual(json.loads(connection.execute.call_args.args[1][0]), report)
+
+    def test_upload_persists_report_before_returning_success(self):
+        with (
+            patch.object(report_app, "DATABASE_URL", "postgresql://test"),
+            patch.object(report_app, "write_persisted_report") as write_report,
+        ):
+            response = self.client.post(
+                "/api/upload",
+                data={"file": (io.BytesIO(make_workbook()), "guests.xlsx")},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        write_report.assert_called_once_with(response.get_json()["report"])
+
+    def test_upload_reports_persistence_failure(self):
+        report_app._current_report = {"previous": True}
+        with (
+            patch.object(report_app, "DATABASE_URL", "postgresql://test"),
+            patch.object(
+                report_app,
+                "write_persisted_report",
+                side_effect=report_app.psycopg.OperationalError("database unavailable"),
+            ),
+        ):
+            response = self.client.post(
+                "/api/upload",
+                data={"file": (io.BytesIO(make_workbook()), "guests.xlsx")},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(report_app._current_report, {"previous": True})
 
     def test_authentication_protects_dashboard_and_report_api(self):
         with (

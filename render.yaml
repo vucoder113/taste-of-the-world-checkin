@@ -11,5 +11,7 @@ services:
         value: "true"
       - key: SECRET_KEY
         generateValue: true
+      - key: DATABASE_URL
+        sync: false
       - key: APP_PASSWORD
         sync: false

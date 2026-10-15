@@ -15,9 +15,11 @@ Mở `http://127.0.0.1:5000`.
 
 ## Triển khai Render
 
-Repository có `render.yaml` để tạo Web Service chạy bằng Gunicorn. Từ Render, chọn **New > Blueprint** và kết nối repository này. Trước khi mở trang, đặt giá trị bí mật cho biến môi trường `APP_PASSWORD`; `SECRET_KEY` được Render tạo tự động và `REQUIRE_AUTH=true` bật trang đăng nhập. Không lưu mật khẩu hoặc dữ liệu Excel trong GitHub.
+Repository có `render.yaml` để tạo Web Service chạy bằng Gunicorn. Từ Render, chọn **New > Blueprint** và kết nối repository này. Cấu hình bật `REQUIRE_AUTH=true`, Render tạo `SECRET_KEY`, và cần cung cấp hai biến bí mật `APP_PASSWORD` và `DATABASE_URL`.
 
-Mỗi lần triển khai, khởi động lại hoặc scale service có thể làm mất báo cáo đang giữ trong bộ nhớ. Sau khi mở website, đăng nhập rồi tải lên lại bốn file Excel. Bản miễn phí của Render có thể ngủ khi không hoạt động. Dùng dữ liệu khách thật chỉ khi tài khoản/mật khẩu được giữ riêng và chỉ chia sẻ URL với người được phép.
+Để lấy `DATABASE_URL`, trong Supabase mở **Connect > Connection string**, chọn dạng **URI** và **Transaction pooler**, rồi sao chép URI vào biến `DATABASE_URL` trong Render. Thay placeholder mật khẩu bằng mật khẩu database của dự án Supabase; ứng dụng kết nối qua TLS. Không gửi URI hoặc mật khẩu cho người khác và không lưu chúng vào GitHub. Không cần tạo bảng thủ công: ứng dụng tự tạo schema riêng `app_private` và bảng lưu báo cáo khi kết nối lần đầu; schema và bảng bị thu hồi quyền truy cập công khai.
+
+Sau khi Render triển khai thành công, đăng nhập và tải lên bốn file Excel một lần. Từ đó báo cáo được nạp lại từ Supabase khi website mở hoặc Render khởi động lại. Có thể tải bộ Excel mới lên để thay thế báo cáo đã lưu. File khách mời được lưu trong database Supabase; chỉ dùng dự án và thông tin kết nối được bảo vệ, và chỉ chia sẻ URL/mật khẩu website với người được phép.
 
 ## Các file Excel
 
@@ -36,4 +38,4 @@ Khi chạy trực tiếp bằng `python app.py`, ứng dụng tự nạp các fi
 
 ## Riêng tư dữ liệu
 
-Workbook tải lên được đọc trong bộ nhớ và không được ghi vào đĩa. Báo cáo nạp tự động được đọc từ thư mục đã cấu hình; báo cáo hiện tại chỉ tồn tại trong bộ nhớ đến khi server khởi động lại. Bản cấu hình Render bật đăng nhập bằng `APP_PASSWORD`; thay mật khẩu nếu bị lộ và không chia sẻ mật khẩu qua GitHub hoặc mã nguồn.
+Workbook tải lên được đọc trong bộ nhớ; ứng dụng chỉ lưu báo cáo đã phân tích vào schema riêng trong Supabase, không lưu workbook gốc. Chạy local không cấu hình `DATABASE_URL` thì báo cáo hiện tại chỉ tồn tại trong bộ nhớ đến khi server khởi động lại. Bản cấu hình Render yêu cầu đăng nhập bằng `APP_PASSWORD`; thay mật khẩu nếu bị lộ và không chia sẻ thông tin đăng nhập database qua GitHub hoặc mã nguồn.

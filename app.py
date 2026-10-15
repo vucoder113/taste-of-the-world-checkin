@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import hmac
+import json
 import threading
 import unicodedata
 from collections import defaultdict
@@ -12,6 +13,7 @@ from typing import Any
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from openpyxl import load_workbook
+import psycopg
 from werkzeug.exceptions import RequestEntityTooLarge
 
 
@@ -60,8 +62,11 @@ app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 AUTH_REQUIRED = environ.get("REQUIRE_AUTH", "").casefold() in {"1", "true", "yes"}
 APP_PASSWORD = environ.get("APP_PASSWORD", "")
 SECRET_KEY = environ.get("SECRET_KEY", "")
+DATABASE_URL = environ.get("DATABASE_URL", "")
 if AUTH_REQUIRED and (not APP_PASSWORD or not SECRET_KEY):
     raise RuntimeError("REQUIRE_AUTH cần được bật cùng APP_PASSWORD và SECRET_KEY.")
+if AUTH_REQUIRED and not DATABASE_URL:
+    raise RuntimeError("Website triển khai cần DATABASE_URL để lưu báo cáo bền vững.")
 app.config.update(
     SECRET_KEY=SECRET_KEY or None,
     SESSION_COOKIE_HTTPONLY=True,
@@ -70,6 +75,46 @@ app.config.update(
 )
 _report_lock = threading.Lock()
 _current_report: dict[str, Any] | None = None
+
+
+def _ensure_report_table(connection: psycopg.Connection) -> None:
+    connection.execute("CREATE SCHEMA IF NOT EXISTS app_private")
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_private.reports (
+            id smallint PRIMARY KEY CHECK (id = 1),
+            payload jsonb NOT NULL,
+            updated_at timestamptz NOT NULL DEFAULT now()
+        )
+        """
+    )
+    connection.execute("ALTER TABLE app_private.reports ENABLE ROW LEVEL SECURITY")
+    connection.execute("REVOKE ALL ON SCHEMA app_private FROM PUBLIC")
+    connection.execute("REVOKE ALL ON TABLE app_private.reports FROM PUBLIC")
+
+
+def read_persisted_report() -> dict[str, Any] | None:
+    with psycopg.connect(DATABASE_URL, connect_timeout=10, sslmode="require") as connection:
+        _ensure_report_table(connection)
+        row = connection.execute(
+            "SELECT payload FROM app_private.reports WHERE id = 1"
+        ).fetchone()
+    return row[0] if row else None
+
+
+def write_persisted_report(report: dict[str, Any]) -> None:
+    payload = json.dumps(report, ensure_ascii=False)
+    with psycopg.connect(DATABASE_URL, connect_timeout=10, sslmode="require") as connection:
+        _ensure_report_table(connection)
+        connection.execute(
+            """
+            INSERT INTO app_private.reports (id, payload)
+            VALUES (1, %s::jsonb)
+            ON CONFLICT (id) DO UPDATE
+            SET payload = EXCLUDED.payload, updated_at = now()
+            """,
+            (payload,),
+        )
 
 
 @app.before_request
@@ -781,6 +826,16 @@ def index():
 
 @app.get("/api/report")
 def get_report():
+    if DATABASE_URL:
+        try:
+            report = read_persisted_report()
+        except psycopg.Error:
+            app.logger.exception("Không thể đọc báo cáo đã lưu trên Supabase.")
+            return jsonify({"ok": False, "message": "Không thể tải báo cáo đã lưu. Vui lòng thử lại sau."}), 503
+        if report is None:
+            return jsonify({"ok": False, "message": "Chưa có báo cáo. Hãy tải lên 4 file Excel."}), 404
+        return jsonify({"ok": True, "report": report})
+
     with _report_lock:
         if _current_report is None:
             return jsonify({"ok": False, "message": "Chưa có báo cáo. Hãy tải lên file Excel."}), 404
@@ -810,6 +865,12 @@ def upload():
                 ])
     except ValueError as error:
         return jsonify({"ok": False, "message": str(error)}), 400
+    if DATABASE_URL:
+        try:
+            write_persisted_report(report)
+        except psycopg.Error:
+            app.logger.exception("Không thể lưu báo cáo lên Supabase.")
+            return jsonify({"ok": False, "message": "Không thể lưu báo cáo lâu dài. Vui lòng thử lại sau."}), 503
     with _report_lock:
         global _current_report
         _current_report = report
