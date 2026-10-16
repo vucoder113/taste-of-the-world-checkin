@@ -44,10 +44,13 @@ body{margin:0;min-width:360px}
 @media(max-width:1100px){.metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .table-panel .table-wrap{width:100%}
-.table-panel table{width:100%;min-width:850px;table-layout:fixed}
+.table-panel table{width:100%;min-width:850px;table-layout:fixed;border-collapse:separate;border-spacing:0}
 .table-panel th,.table-panel td{padding-left:8px;padding-right:8px}
 .table-panel th{white-space:normal;line-height:1.3;letter-spacing:.04em}
 .table-panel th:first-child,.table-panel td:first-child{padding-left:16px}
+.table-panel th:first-child,.table-panel td:first-child{position:sticky;left:0}
+.table-panel th:first-child{z-index:3;background:#f7f8f5}
+.table-panel td:first-child{z-index:1;background:#fff;box-shadow:2px 0 4px #10271e0d}
 .table-panel th:nth-child(1),.table-panel td:nth-child(1){width:20%}
 .table-panel th:nth-child(2),.table-panel td:nth-child(2){width:15%}
 .table-panel th:nth-child(3),.table-panel td:nth-child(3){width:13%}
@@ -82,4 +85,4 @@ body{margin:0;min-width:360px}
 .comparison-empty{padding:20px;border-radius:8px;background:#f7f8f5;color:#69736a;font-size:12px;line-height:1.6}
 @media(max-width:900px){.upload-box{flex-wrap:wrap;justify-content:flex-end}.comparison-panel .panel-heading{align-items:start}}
 @media(max-width:600px){.upload-box{justify-content:flex-start}.upload-hint{width:100%}.region-tabs{width:100%;overflow:auto}.region-tab{white-space:nowrap;padding:10px 11px}.comparison-panel{padding:18px 14px}.comparison-panel .panel-heading{flex-direction:column}.comparison-note{max-width:none}}
-@media(max-width:600px){.chart{max-height:none;overflow:visible}.chart-row{grid-template-columns:minmax(0,32%) minmax(0,1fr) 36px;gap:8px}}
+@media(max-width:600px){.chart{max-height:none;overflow:visible}.chart-row{grid-template-columns:minmax(0,35%) minmax(0,1fr) 36px;gap:8px;min-height:36px}.chart-row-label{overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere;line-height:1.25}}
