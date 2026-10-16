@@ -84,6 +84,15 @@
 
       <section id="source-summary" class="source-summary" aria-label="Kiểm tra nguồn dữ liệu"></section>
       <div id="report-warnings" class="report-warnings" role="status" hidden></div>
+      <form id="dinner-adjustment-form" class="dinner-adjustment" hidden>
+        <div>
+          <strong>Điều chỉnh check-in tiệc tối HCM</strong>
+          <p id="dinner-adjustment-note">Số điều chỉnh sẽ được lưu cùng báo cáo; phần tăng thêm không gán cho kênh hoặc nhân viên cụ thể.</p>
+        </div>
+        <label for="dinner-adjustment-total">Tổng khách đã check-in</label>
+        <input id="dinner-adjustment-total" name="total" type="number" min="0" step="1" required>
+        <button id="dinner-adjustment-submit" class="button button-outline" type="submit">Lưu số điều chỉnh</button>
+      </form>
 
       <section class="panel chart-panel">
         <div class="panel-heading">

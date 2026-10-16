@@ -362,6 +362,7 @@ class ReportAppTests(unittest.TestCase):
         self.assertIn("CHECK-IN BUỔI CHIỀU", response.get_data(as_text=True))
         self.assertIn("TỶ LỆ THAM DỰ", response.get_data(as_text=True))
         self.assertIn("Chưa đối chiếu Target", response.get_data(as_text=True))
+        self.assertIn("dinner-adjustment-form", response.get_data(as_text=True))
 
     def test_reads_four_separate_workbooks_without_merging_lists(self):
         report = report_app.parse_separate_files(make_separate_files())
@@ -553,6 +554,28 @@ class ReportAppTests(unittest.TestCase):
         self.assertEqual(response.get_json()["report"]["totals"]["dinner"], 120)
         persisted = self.client.get("/api/report?region=HCM").get_json()["report"]
         self.assertEqual(persisted["totals"]["dinner"], 120)
+
+    def test_manual_hcm_adjustment_api_persists_to_supabase(self):
+        report = report_app.parse_separate_files(make_hcm_files(), region="HCM")
+        stored_reports = {"regions": {"HN": {"totals": {"dinner": 10}}, "HCM": report}}
+        with (
+            patch.object(report_app, "DATABASE_URL", "postgresql://test"),
+            patch.object(report_app, "read_persisted_report", return_value=stored_reports),
+            patch.object(report_app, "write_persisted_report") as write_report,
+        ):
+            response = self.client.post(
+                "/api/report/adjust",
+                json={
+                    "region": "HCM",
+                    "dinner_checkins": 7,
+                    "reason": "Dashboard test adjustment",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        persisted_payload = write_report.call_args.args[0]
+        self.assertEqual(persisted_payload["regions"]["HCM"]["totals"]["dinner"], 7)
+        self.assertEqual(persisted_payload["regions"]["HN"], {"totals": {"dinner": 10}})
 
     def test_uploading_hcm_preserves_hanoi_report(self):
         hanoi_response = self.client.post(
