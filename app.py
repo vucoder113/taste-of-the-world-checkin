@@ -41,7 +41,7 @@ ALIASES = {
     "customer_id": ("ma khach hang", "ma kh", "ma khach", "customer id", "customer code"),
     "phone": ("so dien thoai", "dien thoai", "sdt", "phone", "mobile"),
     "email": ("email", "e mail", "thu dien tu", "email address"),
-    "customer_name": ("ho va ten", "ho ten khach hang", "ten khach hang", "ten kh", "ten khach", "ho ten", "name"),
+    "customer_name": ("ho va ten", "ho ten khach hang", "ten khach hang", "ten kh", "ten khach", "ten dai dien", "ho ten", "name"),
     "inviter": (
         "sale", "ten sale", "sale moi", "sale moi khach", "sale phu trach",
         "ten nguoi moi", "nguoi moi", "nhan vien moi", "nv moi",
@@ -55,6 +55,8 @@ ALIASES = {
     "guest_count": ("sl khach", "so khach", "so luong khach", "guest count", "quantity"),
     "checked_in": ("check in", "checkin", "da check in", "check in status"),
     "inviter_department": ("bo phan moi", "phong ban moi", "don vi moi"),
+    "city": ("thanh pho", "city", "tinh thanh", "province"),
+    "channel": ("kenh", "channel"),
 }
 
 app = Flask(__name__)
@@ -74,7 +76,8 @@ app.config.update(
     SESSION_COOKIE_SECURE=AUTH_REQUIRED,
 )
 _report_lock = threading.Lock()
-_current_report: dict[str, Any] | None = None
+_current_reports: dict[str, dict[str, Any]] = {}
+REGIONS = {"HN": "Hà Nội", "HCM": "TP. Hồ Chí Minh"}
 
 
 def _ensure_report_table(connection: psycopg.Connection) -> None:
@@ -100,6 +103,83 @@ def read_persisted_report() -> dict[str, Any] | None:
             "SELECT payload FROM app_private.reports WHERE id = 1"
         ).fetchone()
     return row[0] if row else None
+
+
+def reports_from_payload(payload: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    if not payload:
+        return {}
+    regions = payload.get("regions")
+    if isinstance(regions, dict):
+        return {
+            region: report
+            for region, report in regions.items()
+            if region in REGIONS and isinstance(report, dict)
+        }
+    return {"HN": payload}
+
+
+def set_dinner_checkin_total(report: dict[str, Any], total: int, reason: str) -> dict[str, Any]:
+    if total < 0:
+        raise ValueError("Số khách check-in tiệc tối không được âm.")
+
+    adjustments = report.get("manual_adjustments", {})
+    previous = adjustments.get("dinner_checkins", {})
+    base_total = previous.get("base_total", report["totals"]["dinner"])
+    delta = total - base_total
+    if delta < 0:
+        raise ValueError(
+            f"Số check-in điều chỉnh ({total}) thấp hơn số đã ghi nhận trong dữ liệu nguồn ({base_total})."
+        )
+
+    charts = report.setdefault("charts", {})
+    dinner_chart = charts.setdefault("dinner", [])
+    manual_group = next(
+        (group for group in dinner_chart if group.get("name") == "Điều chỉnh thủ công"),
+        None,
+    )
+    if delta:
+        if manual_group is None:
+            manual_group = {
+                "name": "Điều chỉnh thủ công",
+                "vip": 0,
+                "non_vip": 0,
+                "unclassified": delta,
+                "count": delta,
+            }
+            dinner_chart.append(manual_group)
+        else:
+            manual_group.update({"vip": 0, "non_vip": 0, "unclassified": delta, "count": delta})
+    elif manual_group is not None:
+        dinner_chart.remove(manual_group)
+
+    report["totals"]["dinner"] = total
+    if "unmatched" in report:
+        source_unmatched = previous.get("base_unmatched", report["unmatched"].get("dinner", 0))
+        report["unmatched"]["dinner"] = source_unmatched + delta
+
+    if delta:
+        adjustments = report.setdefault("manual_adjustments", {})
+        adjustments["dinner_checkins"] = {
+            "base_total": base_total,
+            "base_unmatched": previous.get("base_unmatched", report.get("unmatched", {}).get("dinner", 0) - delta),
+            "total": total,
+            "delta": delta,
+            "reason": reason,
+        }
+    else:
+        adjustments.pop("dinner_checkins", None)
+        if not adjustments:
+            report.pop("manual_adjustments", None)
+
+    message = (
+        f"Điều chỉnh thủ công check-in tiệc tối: {total} khách "
+        f"(tăng {delta} so với dữ liệu nguồn). Lý do: {reason}"
+    )
+    warnings = report.setdefault("warnings", [])
+    warnings[:] = [warning for warning in warnings if not warning.startswith("Điều chỉnh thủ công check-in tiệc tối:")]
+    if delta:
+        warnings.append(message)
+    return report
 
 
 def write_persisted_report(report: dict[str, Any]) -> None:
@@ -484,8 +564,22 @@ def classify_separate_file(filename: str, headers: list[str]) -> str:
     raise ValueError(f"Không xác định được loại dữ liệu của file “{filename}”. Hãy chọn đúng 4 file Excel đã cung cấp.")
 
 
-def parse_separate_files(files: list[tuple[str, bytes]]) -> dict[str, Any]:
+def city_region(value: Any) -> str | None:
+    normalized = normalize(value)
+    if normalized in {"hn", "hanoi", "thanhphohanoi"}:
+        return "HN"
+    if normalized in {"hcm", "tphcm", "hochiminh", "thanhphohochiminh", "saigon"}:
+        return "HCM"
+    return None
+
+
+def parse_separate_files(files: list[tuple[str, bytes]], region: str = "HN") -> dict[str, Any]:
+    if region not in REGIONS:
+        raise ValueError("Miền báo cáo không hợp lệ.")
     sources: dict[str, tuple[str, list[dict[str, str]]]] = {}
+    region_warnings: list[str] = []
+    missing_inviter_columns: set[str] = set()
+    chart_group_by = {category: "Người mời" for category in ("registered", "afternoon", "dinner_invited", "dinner")}
     required_sources = {"registered", "afternoon", "dinner", "employees"}
     for filename, file_bytes in files:
         try:
@@ -501,12 +595,36 @@ def parse_separate_files(files: list[tuple[str, bytes]]) -> dict[str, Any]:
             required_fields = {
                 "registered": ("customer_name", "phone", "employee"),
                 "afternoon": ("customer_name", "inviter"),
-                "dinner": ("customer_name", "guest_count", "inviter", "checked_in"),
+                "dinner": ("customer_name", "guest_count", "checked_in"),
                 "employees": ("employee", "target"),
             }[role]
             if any(column_index(headers, field) is None for field in required_fields):
                 raise ValueError(f"File “{filename}” thiếu cột cần thiết để đọc đầy đủ dữ liệu.")
+            if role in {"afternoon", "dinner"} and column_index(headers, "inviter") is None:
+                missing_inviter_columns.add(role)
+                if role == "dinner" and column_index(headers, "channel") is not None:
+                    chart_group_by["dinner"] = "Kênh"
+                    chart_group_by["dinner_invited"] = "Kênh"
             rows = read_sheet(workbook, sheet.title)
+            if role in {"registered", "afternoon"} and column_index(headers, "city") is not None:
+                kept_rows = []
+                excluded_count = 0
+                for row in rows:
+                    row_region = city_region(row.get("_city", ""))
+                    if row_region is not None and row_region != region:
+                        excluded_count += 1
+                    else:
+                        kept_rows.append(row)
+                rows = kept_rows
+                if excluded_count:
+                    region_warnings.append(
+                        f"Đã bỏ qua {excluded_count} dòng thuộc miền khác trong file “{filename}”."
+                    )
+            if role == "dinner":
+                rows = [
+                    row for row in rows
+                    if any(row.get(f"_{field}") for field in ("customer_name", "guest_count", "checked_in"))
+                ]
         finally:
             workbook.close()
         if role in sources:
@@ -592,6 +710,8 @@ def parse_separate_files(files: list[tuple[str, bytes]]) -> dict[str, Any]:
             )
             for chart_category in chart_categories:
                 chart_inviter = matched_employee["name"] if matched_employee else inviter
+                if source_category == "dinner" and chart_group_by[chart_category] == "Kênh":
+                    chart_inviter = row.get("_channel", "") or "Chưa xác định"
                 group = chart_groups[chart_category][normalize(chart_inviter)]
                 group["name"] = chart_inviter
                 group["count"] += measurable_quantity
@@ -624,11 +744,16 @@ def parse_separate_files(files: list[tuple[str, bytes]]) -> dict[str, Any]:
         "afternoon": "khách check-in buổi chiều",
         "dinner": "khách mời tiệc tối",
     }
-    warnings = [
+    warnings = region_warnings + [
         f"{sum(not (row.get('_employee') if category == 'registered' else row.get('_inviter')) for row in sources[category][1])} dòng {source_labels[category]} chưa có tên người mời; các dòng này vẫn có trong nhóm “Chưa xác định”."
         for category in ("registered", "afternoon", "dinner")
+        if category not in missing_inviter_columns
         if any(not (row.get("_employee") if category == "registered" else row.get("_inviter")) for row in sources[category][1])
     ]
+    if "dinner" in missing_inviter_columns and dinner_invited:
+        warnings.append(
+            f"File “{sources['dinner'][0]}” không có cột người mời; {dinner_invited} khách tiệc tối vẫn được tính vào tổng nhưng nằm trong nhóm “Chưa xác định”."
+        )
     if dinner_unquantified:
         warnings.append(
             f"{dinner_unquantified} dòng tiệc tối thiếu hoặc sai số lượng ở cột SL Khách; trong đó {dinner_unquantified_checkins} dòng đã đánh dấu check-in. Chưa tính các dòng này vào tổng khách/check-in."
@@ -636,6 +761,7 @@ def parse_separate_files(files: list[tuple[str, bytes]]) -> dict[str, Any]:
     return {
         "employees": employees,
         "charts": charts,
+        "chart_group_by": chart_group_by,
         "unmatched": unmatched,
         "totals": {
             "employees": target_employee_count,
@@ -828,18 +954,24 @@ def index():
 def get_report():
     if DATABASE_URL:
         try:
-            report = read_persisted_report()
+            reports = reports_from_payload(read_persisted_report())
         except psycopg.Error:
             app.logger.exception("Không thể đọc báo cáo đã lưu trên Supabase.")
             return jsonify({"ok": False, "message": "Không thể tải báo cáo đã lưu. Vui lòng thử lại sau."}), 503
-        if report is None:
-            return jsonify({"ok": False, "message": "Chưa có báo cáo. Hãy tải lên 4 file Excel."}), 404
-        return jsonify({"ok": True, "report": report})
-
-    with _report_lock:
-        if _current_report is None:
-            return jsonify({"ok": False, "message": "Chưa có báo cáo. Hãy tải lên file Excel."}), 404
-        return jsonify({"ok": True, "report": _current_report})
+    else:
+        with _report_lock:
+            reports = dict(_current_reports)
+    if not reports:
+        return jsonify({"ok": False, "message": "Chưa có báo cáo. Hãy tải lên 4 file Excel."}), 404
+    region = request.args.get("region", "HN").upper()
+    if region not in REGIONS:
+        return jsonify({"ok": False, "message": "Miền báo cáo không hợp lệ."}), 400
+    return jsonify({
+        "ok": True,
+        "report": reports.get(region),
+        "reports": reports,
+        "region": region,
+    })
 
 
 @app.post("/api/upload")
@@ -849,6 +981,9 @@ def upload():
     if uploaded is None and not uploaded_files:
         return jsonify({"ok": False, "message": "Vui lòng chọn 4 file Excel .xlsx."}), 400
     try:
+        region = request.form.get("region", "HN").strip().upper()
+        if region not in REGIONS:
+            raise ValueError("Vui lòng chọn miền Hà Nội hoặc TP. Hồ Chí Minh.")
         if uploaded is not None:
             if not uploaded.filename or not uploaded.filename.lower().endswith(".xlsx"):
                 raise ValueError("Chỉ hỗ trợ file Excel định dạng .xlsx.")
@@ -862,19 +997,74 @@ def upload():
                 report = parse_separate_files([
                     (file.filename, file.read())
                     for file in uploaded_files
-                ])
+                ], region=region)
     except ValueError as error:
         return jsonify({"ok": False, "message": str(error)}), 400
     if DATABASE_URL:
         try:
-            write_persisted_report(report)
+            reports = reports_from_payload(read_persisted_report())
+            reports[region] = report
+            write_persisted_report({"regions": reports})
         except psycopg.Error:
-            app.logger.exception("Không thể lưu báo cáo lên Supabase.")
+            app.logger.exception("Không thể cập nhật báo cáo trên Supabase.")
             return jsonify({"ok": False, "message": "Không thể lưu báo cáo lâu dài. Vui lòng thử lại sau."}), 503
     with _report_lock:
-        global _current_report
-        _current_report = report
-    return jsonify({"ok": True, "report": report})
+        if not DATABASE_URL:
+            reports = dict(_current_reports)
+            reports[region] = report
+        _current_reports.clear()
+        _current_reports.update(reports)
+    return jsonify({
+        "ok": True,
+        "report": report,
+        "reports": reports,
+        "region": region,
+    })
+
+
+@app.post("/api/report/adjust")
+def adjust_report():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "message": "Dữ liệu điều chỉnh không hợp lệ."}), 400
+    region = str(payload.get("region", "")).strip().upper()
+    if region != "HCM":
+        return jsonify({"ok": False, "message": "Chỉ hỗ trợ điều chỉnh check-in tiệc tối cho HCM."}), 400
+    total = payload.get("dinner_checkins")
+    if isinstance(total, bool) or not isinstance(total, int):
+        return jsonify({"ok": False, "message": "Số check-in tiệc tối phải là số nguyên."}), 400
+    reason = str(payload.get("reason", "")).strip()
+    if not reason:
+        return jsonify({"ok": False, "message": "Vui lòng ghi rõ lý do điều chỉnh."}), 400
+
+    if DATABASE_URL:
+        try:
+            reports = reports_from_payload(read_persisted_report())
+            report = reports.get(region)
+            if report is None:
+                return jsonify({"ok": False, "message": "Chưa có báo cáo HCM để điều chỉnh."}), 404
+            adjusted = set_dinner_checkin_total(report, total, reason)
+            reports[region] = adjusted
+            write_persisted_report({"regions": reports})
+        except ValueError as error:
+            return jsonify({"ok": False, "message": str(error)}), 400
+        except psycopg.Error:
+            app.logger.exception("Không thể lưu điều chỉnh báo cáo lên Supabase.")
+            return jsonify({"ok": False, "message": "Không thể lưu điều chỉnh lâu dài. Vui lòng thử lại sau."}), 503
+    else:
+        with _report_lock:
+            reports = dict(_current_reports)
+            report = reports.get(region)
+            if report is None:
+                return jsonify({"ok": False, "message": "Chưa có báo cáo HCM để điều chỉnh."}), 404
+            try:
+                adjusted = set_dinner_checkin_total(report, total, reason)
+            except ValueError as error:
+                return jsonify({"ok": False, "message": str(error)}), 400
+            reports[region] = adjusted
+            _current_reports.clear()
+            _current_reports.update(reports)
+    return jsonify({"ok": True, "region": region, "report": adjusted, "reports": reports})
 
 
 @app.errorhandler(RequestEntityTooLarge)
@@ -898,9 +1088,9 @@ def load_default_report() -> None:
     except (OSError, ValueError) as error:
         app.logger.error("Không thể tự nạp báo cáo từ %s: %s", source_dir, error)
         return
-    global _current_report
+    global _current_reports
     with _report_lock:
-        _current_report = report
+        _current_reports = {"HN": report}
     app.logger.info("Đã nạp báo cáo từ %s", source_dir)
 
 

@@ -24,12 +24,18 @@
   <main class="shell">
     <section class="intro">
       <div>
-        <p class="eyebrow">DASHBOARD · HÀ NỘI</p>
+        <p class="eyebrow" id="region-eyebrow">DASHBOARD · HÀ NỘI</p>
         <h1>Khách mời &amp; check-in</h1>
         <p class="subhead">Theo dõi đăng ký, check-in và hiệu quả mời khách của đội ngũ.</p>
       </div>
       <form id="upload-form" class="upload-box">
         <input id="excel-file" type="file" accept=".xlsx" multiple hidden>
+        <label class="upload-region">Cập nhật dữ liệu miền
+          <select id="upload-region">
+            <option value="HN">Hà Nội</option>
+            <option value="HCM">TP. Hồ Chí Minh</option>
+          </select>
+        </label>
         <button class="button button-primary" id="choose-file" type="button">
           <span aria-hidden="true">↑</span> Chọn 4 file Excel
         </button>
@@ -37,12 +43,34 @@
       </form>
     </section>
 
+    <nav class="region-tabs" aria-label="Chọn báo cáo">
+      <button type="button" class="region-tab active" data-view="HN" aria-pressed="true">Hà Nội</button>
+      <button type="button" class="region-tab" data-view="HCM" aria-pressed="false">TP. Hồ Chí Minh</button>
+      <button type="button" class="region-tab" data-view="compare" aria-pressed="false">So sánh hai miền</button>
+    </nav>
+
     <div id="notice" class="notice" role="status" hidden></div>
     <section id="empty-state" class="empty-state">
       <div class="empty-icon">↥</div>
       <h2>Chưa có dữ liệu báo cáo</h2>
-      <p>Chọn 4 file Excel riêng: danh sách đăng ký, danh sách check-in buổi chiều, khách mời tiệc tối và chỉ tiêu nhân viên.</p>
+      <p id="empty-message">Chọn 4 file Excel riêng: danh sách đăng ký, danh sách check-in buổi chiều, khách mời tiệc tối và chỉ tiêu nhân viên.</p>
       <button class="button button-outline" id="empty-choose" type="button">Chọn 4 file Excel</button>
+    </section>
+
+    <section id="compare-dashboard" hidden>
+      <section class="panel comparison-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">BÁO CÁO ĐỐI CHIẾU</p><h2>Hà Nội · TP. Hồ Chí Minh</h2></div>
+          <p class="comparison-note">Chênh lệch = HCM − Hà Nội. Tỷ lệ check-in tối = số khách check-in / số khách mời tiệc tối.</p>
+        </div>
+        <div id="comparison-empty" class="comparison-empty" hidden>Cần có báo cáo của cả Hà Nội và TP. Hồ Chí Minh để so sánh. Chọn miền ở mục “Cập nhật dữ liệu miền” rồi tải lên 4 file Excel tương ứng.</div>
+        <div id="comparison-table-wrap" class="table-wrap">
+          <table class="comparison-table">
+            <thead><tr><th>CHỈ TIÊU</th><th>HÀ NỘI</th><th>TP. HỒ CHÍ MINH</th><th>CHÊNH LỆCH</th></tr></thead>
+            <tbody id="comparison-rows"></tbody>
+          </table>
+        </div>
+      </section>
     </section>
 
     <div id="dashboard" hidden>
@@ -73,7 +101,7 @@
               <option value="non_vip">Không VIP</option>
               <option value="unclassified">Chưa phân loại VIP</option>
             </select></label>
-            <label>Người mời<select id="inviter-filter"><option value="all">Tất cả nhân viên</option></select></label>
+            <label><span id="chart-group-label">Người mời</span><select id="inviter-filter"><option value="all">Tất cả nhân viên</option></select></label>
           </div>
         </div>
         <div class="chart-legend"><span><i class="legend-vip"></i>VIP</span><span><i class="legend-normal"></i>Không VIP</span><span><i class="legend-unclassified"></i>Chưa phân loại</span><strong id="chart-total">0 khách</strong></div>

@@ -83,11 +83,51 @@ def make_separate_files():
     return result
 
 
+def make_hcm_files():
+    registered = Workbook()
+    sheet = registered.active
+    sheet.append(["STT", "Ho ten", "SDT", "Email", "Thanh pho", "Nhan vien moi"])
+    sheet.append([1, "Khách HCM", "0900000001", "hcm@example.com", "HCM", "Nguyễn An"])
+    sheet.append([2, "Khách HN", "0900000002", "hn@example.com", "Hà Nội", "Nguyễn An"])
+
+    afternoon = Workbook()
+    sheet = afternoon.active
+    sheet.append(["STT", "Ho ten", "SDT", "Thanh pho", "Nhân viên mời"])
+    sheet.append([1, "Khách chiều HCM", "0900000003", "TP. Hồ Chí Minh", "Nguyễn An"])
+    sheet.append([2, "Khách chiều HN", "0900000004", "HN", "Nguyễn An"])
+
+    dinner = Workbook()
+    sheet = dinner.active
+    sheet.append(["DANH SÁCH KHÁCH MỜI TIỆC TỐI"])
+    sheet.append(["STT", "Kênh", "Tên đại diện", "Tên công ty", "SL khách tham dự", "Số thăm", "Check-in"])
+    sheet.append(["KÊNH CH", None, None, None, None, None, None])
+    sheet.append([1, "Kênh CH", "Đại diện Một", "Công ty Một", 1, "45", "✓"])
+    sheet.append([2, "Supplier & VIP", "Đại diện Hai", "Công ty Hai", 2, None, "☐"])
+
+    employees = Workbook()
+    sheet = employees.active
+    sheet.append(["Tên nhân viên", "Chức vụ", "Phòng ban", "Số khách target"])
+    sheet.append(["Nguyễn An", "Quản lý", "Kinh doanh", 8])
+
+    result = []
+    for filename, workbook in (
+        ("DS KHÁCH ĐĂNG KÍ QR.xlsx", registered),
+        ("DS KHÁCH CHECK IN CHIỀU.xlsx", afternoon),
+        ("DS_Khach_Moi_Tiec_Toi.xlsx", dinner),
+        ("DS TARGET KHÁCH.xlsx", employees),
+    ):
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+        result.append((filename, output.getvalue()))
+    return result
+
+
 class ReportAppTests(unittest.TestCase):
     def setUp(self):
         report_app.app.config["TESTING"] = True
         self.client = report_app.app.test_client()
-        report_app._current_report = None
+        report_app._current_reports = {}
 
     def test_upload_builds_linked_employee_report(self):
         response = self.client.post(
@@ -195,6 +235,13 @@ class ReportAppTests(unittest.TestCase):
         response = self.client.get("/api/report")
         self.assertEqual(response.status_code, 404)
 
+    def test_report_endpoint_rejects_unknown_region(self):
+        report_app._current_reports = {"HN": {"totals": {}}}
+
+        response = self.client.get("/api/report?region=unknown")
+
+        self.assertEqual(response.status_code, 400)
+
     def test_report_endpoint_reads_persisted_report(self):
         expected = {"totals": {"employees": 1}}
         with (
@@ -205,6 +252,7 @@ class ReportAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["report"], expected)
+        self.assertEqual(response.get_json()["reports"], {"HN": expected})
         read_report.assert_called_once_with()
 
     def test_persisted_report_storage_uses_private_schema_and_tls(self):
@@ -230,6 +278,7 @@ class ReportAppTests(unittest.TestCase):
     def test_upload_persists_report_before_returning_success(self):
         with (
             patch.object(report_app, "DATABASE_URL", "postgresql://test"),
+            patch.object(report_app, "read_persisted_report", return_value=None),
             patch.object(report_app, "write_persisted_report") as write_report,
         ):
             response = self.client.post(
@@ -239,12 +288,36 @@ class ReportAppTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        write_report.assert_called_once_with(response.get_json()["report"])
+        write_report.assert_called_once_with({"regions": {"HN": response.get_json()["report"]}})
 
-    def test_upload_reports_persistence_failure(self):
-        report_app._current_report = {"previous": True}
+    def test_persisted_hcm_upload_preserves_hanoi_report(self):
+        hanoi = {"totals": {"employees": 10}}
         with (
             patch.object(report_app, "DATABASE_URL", "postgresql://test"),
+            patch.object(report_app, "read_persisted_report", return_value={"regions": {"HN": hanoi}}),
+            patch.object(report_app, "write_persisted_report") as write_report,
+        ):
+            response = self.client.post(
+                "/api/upload",
+                data={
+                    "region": "HCM",
+                    "files": [(io.BytesIO(content), filename) for filename, content in make_hcm_files()],
+                },
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            write_report.call_args.args[0],
+            {"regions": {"HN": hanoi, "HCM": response.get_json()["report"]}},
+        )
+
+    def test_upload_reports_persistence_failure(self):
+        previous = {"totals": {"employees": 1}}
+        report_app._current_reports = {"HN": previous}
+        with (
+            patch.object(report_app, "DATABASE_URL", "postgresql://test"),
+            patch.object(report_app, "read_persisted_report", return_value={"regions": {"HN": previous}}),
             patch.object(
                 report_app,
                 "write_persisted_report",
@@ -258,7 +331,7 @@ class ReportAppTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(report_app._current_report, {"previous": True})
+        self.assertEqual(report_app._current_reports, {"HN": previous})
 
     def test_authentication_protects_dashboard_and_report_api(self):
         with (
@@ -410,6 +483,103 @@ class ReportAppTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["report"]["totals"]["dinner"], 2)
+
+    def test_hcm_parser_filters_city_rows_and_reads_dinner_without_inviter(self):
+        report = report_app.parse_separate_files(make_hcm_files(), region="HCM")
+
+        self.assertEqual(report["totals"], {
+            "employees": 1,
+            "registered": 1,
+            "afternoon": 1,
+            "dinner_invited": 3,
+            "dinner": 1,
+            "dinner_unquantified": 0,
+            "dinner_unquantified_checkins": 0,
+        })
+        self.assertEqual(report["chart_group_by"]["dinner"], "Kênh")
+        self.assertEqual(
+            [(item["name"], item["count"]) for item in report["charts"]["dinner"]],
+            [("Kênh CH", 1)],
+        )
+        self.assertEqual(
+            [(item["name"], item["count"]) for item in report["charts"]["dinner_invited"]],
+            [("Supplier & VIP", 2), ("Kênh CH", 1)],
+        )
+        self.assertEqual(report["unmatched"]["dinner_invited"], 3)
+        self.assertTrue(any("miền khác" in warning for warning in report["warnings"]))
+        self.assertTrue(any("không có cột người mời" in warning for warning in report["warnings"]))
+        self.assertFalse(any("dòng khách mời tiệc tối chưa có tên người mời" in warning for warning in report["warnings"]))
+
+    def test_manual_hcm_dinner_checkin_adjustment_updates_unattributed_chart_only(self):
+        report = report_app.parse_separate_files(make_hcm_files(), region="HCM")
+        employee_checkins = sum(employee["dinner"] for employee in report["employees"])
+
+        report_app.set_dinner_checkin_total(report, 7, "Điều chỉnh theo yêu cầu người dùng")
+
+        self.assertEqual(report["totals"]["dinner"], 7)
+        self.assertEqual(sum(group["count"] for group in report["charts"]["dinner"]), 7)
+        self.assertEqual(
+            next(group for group in report["charts"]["dinner"] if group["name"] == "Điều chỉnh thủ công")["count"],
+            6,
+        )
+        self.assertEqual(report["unmatched"]["dinner"], 7)
+        self.assertEqual(sum(employee["dinner"] for employee in report["employees"]), employee_checkins)
+        self.assertEqual(report["manual_adjustments"]["dinner_checkins"]["base_total"], 1)
+        self.assertTrue(any("7 khách (tăng 6" in warning for warning in report["warnings"]))
+
+        report_app.set_dinner_checkin_total(report, 7, "Điều chỉnh theo yêu cầu người dùng")
+        self.assertEqual(sum(group["count"] for group in report["charts"]["dinner"]), 7)
+
+        report_app.set_dinner_checkin_total(report, 1, "Hủy điều chỉnh")
+        self.assertEqual(report["totals"]["dinner"], 1)
+        self.assertFalse(any(group["name"] == "Điều chỉnh thủ công" for group in report["charts"]["dinner"]))
+        self.assertNotIn("manual_adjustments", report)
+
+    def test_manual_hcm_adjustment_api_updates_current_report(self):
+        report_app._current_reports = {
+            "HCM": report_app.parse_separate_files(make_hcm_files(), region="HCM")
+        }
+
+        response = self.client.post(
+            "/api/report/adjust",
+            json={
+                "region": "HCM",
+                "dinner_checkins": 120,
+                "reason": "Điều chỉnh theo yêu cầu người dùng",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["report"]["totals"]["dinner"], 120)
+        persisted = self.client.get("/api/report?region=HCM").get_json()["report"]
+        self.assertEqual(persisted["totals"]["dinner"], 120)
+
+    def test_uploading_hcm_preserves_hanoi_report(self):
+        hanoi_response = self.client.post(
+            "/api/upload",
+            data={
+                "region": "HN",
+                "files": [(io.BytesIO(content), filename) for filename, content in make_separate_files()],
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(hanoi_response.status_code, 200)
+
+        hcm_response = self.client.post(
+            "/api/upload",
+            data={
+                "region": "HCM",
+                "files": [(io.BytesIO(content), filename) for filename, content in make_hcm_files()],
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(hcm_response.status_code, 200)
+        self.assertEqual(set(hcm_response.get_json()["reports"]), {"HN", "HCM"})
+
+        restored = self.client.get("/api/report").get_json()
+        self.assertEqual(set(restored["reports"]), {"HN", "HCM"})
+        self.assertEqual(restored["reports"]["HN"], hanoi_response.get_json()["report"])
+        self.assertEqual(restored["reports"]["HCM"], hcm_response.get_json()["report"])
 
 
 if __name__ == "__main__":

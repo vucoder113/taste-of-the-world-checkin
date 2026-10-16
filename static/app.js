@@ -1,6 +1,6 @@
 (() => {
   const $ = (selector) => document.querySelector(selector);
-  const state = { report: null };
+  const state = { reports: {}, report: null, view: "HN" };
   const sheetLabels = {
     dinner: "Check-in tiệc tối",
     dinner_invited: "Khách mời tiệc tối",
@@ -10,6 +10,7 @@
   const elements = {
     file: $("#excel-file"), choose: $("#choose-file"), emptyChoose: $("#empty-choose"),
     notice: $("#notice"), empty: $("#empty-state"), dashboard: $("#dashboard"),
+    compareDashboard: $("#compare-dashboard"), uploadRegion: $("#upload-region"),
     chartCategory: $("#chart-category"), vipFilter: $("#vip-filter"), inviterFilter: $("#inviter-filter"),
     chart: $("#chart"), chartEmpty: $("#chart-empty"), chartTotal: $("#chart-total"),
     chartAttribution: $("#chart-attribution"),
@@ -27,17 +28,21 @@
 
   async function uploadFile(files) {
     if (!files || files.length === 0) return;
+    const region = elements.uploadRegion.value;
     const names = [...files].map((file) => file.name);
     $("#upload-name").textContent = names.join(", ");
-    notice(`Đang đọc ${files.length} file Excel…`, false);
+    notice(`Đang đọc ${files.length} file Excel cho ${region === "HN" ? "Hà Nội" : "TP. Hồ Chí Minh"}…`, false);
     const form = new FormData();
     for (const file of files) form.append("files", file);
+    form.append("region", region);
     try {
       const response = await fetch("/api/upload", { method: "POST", body: form });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.message || "Không thể xử lý các file Excel.");
-      state.report = result.report;
-      notice(`Đã đọc báo cáo từ ${files.length} file Excel.`, false);
+      state.reports = result.reports || { [region]: result.report };
+      state.view = region;
+      elements.uploadRegion.value = region;
+      notice(`Đã cập nhật báo cáo ${region === "HN" ? "Hà Nội" : "TP. Hồ Chí Minh"} từ ${files.length} file Excel.`, false);
       render();
     } catch (error) {
       notice(error.message || "Có lỗi khi tải file.");
@@ -45,10 +50,27 @@
   }
 
   function render() {
-    const report = state.report;
+    const isComparison = state.view === "compare";
+    const report = state.reports[state.view] || null;
+    state.report = report;
+    elements.compareDashboard.hidden = !isComparison;
+    elements.dashboard.hidden = isComparison || !report;
+    elements.empty.hidden = isComparison || Boolean(report);
+    $("#region-eyebrow").textContent = isComparison
+      ? "BÁO CÁO · SO SÁNH HAI MIỀN"
+      : `DASHBOARD · ${state.view === "HN" ? "HÀ NỘI" : "TP. HỒ CHÍ MINH"}`;
+    $("#empty-message").textContent = `Chưa có báo cáo ${state.view === "HN" ? "Hà Nội" : "TP. Hồ Chí Minh"}. Chọn miền cần cập nhật rồi tải lên 4 file Excel riêng: đăng ký, check-in buổi chiều, khách mời tiệc tối và chỉ tiêu nhân viên.`;
+    document.querySelectorAll(".region-tab").forEach((button) => {
+      const active = button.dataset.view === state.view;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    if (state.view !== "compare") elements.uploadRegion.value = state.view;
+    if (isComparison) {
+      renderComparison();
+      return;
+    }
     if (!report) return;
-    elements.empty.hidden = true;
-    elements.dashboard.hidden = false;
     $("#metric-employees").textContent = report.totals.employees.toLocaleString("vi-VN");
     $("#metric-registered").textContent = report.totals.registered.toLocaleString("vi-VN");
     $("#metric-afternoon").textContent = report.totals.afternoon.toLocaleString("vi-VN");
@@ -59,6 +81,64 @@
     renderInviters();
     renderChart();
     renderEmployees();
+  }
+
+  function renderComparison() {
+    const hanoi = state.reports.HN;
+    const hcm = state.reports.HCM;
+    const available = Boolean(hanoi && hcm);
+    $("#comparison-empty").hidden = available;
+    $("#comparison-table-wrap").hidden = !available;
+    const body = $("#comparison-rows");
+    body.replaceChildren();
+    if (!available) return;
+
+    const dinnerInvited = (report) => report.totals.dinner_invited ?? report.totals.dinner;
+    const metrics = [
+      ["Nhân viên trong danh sách target", hanoi.totals.employees, hcm.totals.employees],
+      ["Đăng ký tham dự", hanoi.totals.registered, hcm.totals.registered],
+      ["Check-in buổi chiều", hanoi.totals.afternoon, hcm.totals.afternoon],
+      ["Khách mời tiệc tối", dinnerInvited(hanoi), dinnerInvited(hcm)],
+      ["Check-in tiệc tối", hanoi.totals.dinner, hcm.totals.dinner],
+      [
+        "Tỷ lệ check-in tiệc tối",
+        dinnerInvited(hanoi) ? hanoi.totals.dinner / dinnerInvited(hanoi) : null,
+        dinnerInvited(hcm) ? hcm.totals.dinner / dinnerInvited(hcm) : null,
+        true,
+      ],
+    ];
+    for (const [label, hanoiValue, hcmValue, isRate = false] of metrics) {
+      const row = document.createElement("tr");
+      const values = [
+        label,
+        formatComparisonValue(hanoiValue, isRate),
+        formatComparisonValue(hcmValue, isRate),
+        formatComparisonDifference(hanoiValue, hcmValue, isRate),
+      ];
+      for (const value of values) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      body.append(row);
+    }
+  }
+
+  function formatComparisonValue(value, isRate) {
+    if (value == null || !Number.isFinite(value)) return "—";
+    return isRate
+      ? new Intl.NumberFormat("vi-VN", { style: "percent", maximumFractionDigits: 1 }).format(value)
+      : value.toLocaleString("vi-VN");
+  }
+
+  function formatComparisonDifference(hanoiValue, hcmValue, isRate) {
+    if (hanoiValue == null || hcmValue == null) return "—";
+    const difference = hcmValue - hanoiValue;
+    if (isRate) {
+      const points = difference * 100;
+      return `${points > 0 ? "+" : ""}${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 }).format(points)} điểm %`;
+    }
+    return `${difference > 0 ? "+" : ""}${difference.toLocaleString("vi-VN")}`;
   }
 
   function renderSourceSummary() {
@@ -102,21 +182,28 @@
   }
 
   function renderInviters() {
+    const category = elements.chartCategory.value;
+    const groupLabel = state.report.chart_group_by?.[category] || "Người mời";
     const previous = elements.inviterFilter.value || "all";
     const inviters = new Set();
-    for (const data of Object.values(state.report.charts)) {
-      data.forEach((item) => { if (item.name && item.name !== "Chưa xác định") inviters.add(item.name); });
-    }
-    elements.inviterFilter.replaceChildren(new Option("Tất cả nhân viên", "all"));
+    (state.report.charts[category] || []).forEach((item) => {
+      if (item.name && item.name !== "Chưa xác định") inviters.add(item.name);
+    });
+    $("#chart-group-label").textContent = groupLabel;
+    const allLabel = groupLabel === "Kênh" ? "Tất cả kênh" : "Tất cả nhân viên";
+    elements.inviterFilter.replaceChildren(new Option(allLabel, "all"));
     [...inviters].sort((a, b) => a.localeCompare(b, "vi")).forEach((name) => elements.inviterFilter.add(new Option(name, name)));
     if ([...elements.inviterFilter.options].some((option) => option.value === previous)) elements.inviterFilter.value = previous;
   }
 
   function renderChart() {
     const category = elements.chartCategory.value;
+    const groupLabel = state.report.chart_group_by?.[category] || "Người mời";
     const filter = elements.vipFilter.value;
     const selectedInviter = elements.inviterFilter.value;
-    $("#chart-title").textContent = sheetLabels[category];
+    $("#chart-title").textContent = groupLabel === "Kênh"
+      ? `${sheetLabels[category]} theo kênh`
+      : sheetLabels[category];
     const rows = (state.report.charts[category] || [])
       .filter((item) => selectedInviter === "all" || item.name === selectedInviter)
       .map((item) => ({
@@ -176,7 +263,7 @@
     elements.chartEmpty.hidden = rows.length !== 0;
     elements.chartAttribution.hidden = unattributed === 0;
     elements.chartAttribution.textContent = unattributed
-      ? `${unattributed.toLocaleString("vi-VN")} khách chưa xác định được người mời. Hãy kiểm tra cột tên nhân viên/người mời trong sheet.`
+      ? `${unattributed.toLocaleString("vi-VN")} khách chưa có thông tin ${groupLabel.toLocaleLowerCase("vi")}; hãy kiểm tra dữ liệu nguồn.`
       : "";
     elements.chart.setAttribute("aria-label", `Biểu đồ ${sheetLabels[category]}, ${total} khách`);
   }
@@ -350,7 +437,16 @@
   elements.choose.addEventListener("click", () => elements.file.click());
   elements.emptyChoose.addEventListener("click", () => elements.file.click());
   elements.file.addEventListener("change", () => uploadFile(elements.file.files));
-  elements.chartCategory.addEventListener("change", renderChart);
+  document.querySelectorAll(".region-tab").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.view = button.dataset.view;
+      render();
+    });
+  });
+  elements.chartCategory.addEventListener("change", () => {
+    renderInviters();
+    renderChart();
+  });
   elements.vipFilter.addEventListener("change", renderChart);
   elements.inviterFilter.addEventListener("change", renderChart);
   elements.employeeSearch.addEventListener("input", renderEmployees);
@@ -360,9 +456,11 @@
   });
   fetch("/api/report").then((response) => response.ok ? response.json() : null).then((result) => {
     if (result?.ok) {
-      state.report = result.report;
-      notice("Đã khôi phục báo cáo hiện tại trong phiên chạy server.", false);
+      state.reports = result.reports || (result.report ? { HN: result.report } : {});
+      if (!state.reports.HN && state.reports.HCM) state.view = "HCM";
+      elements.uploadRegion.value = state.view === "compare" ? "HN" : state.view;
+      notice("Đã khôi phục báo cáo đã lưu.", false);
       render();
     }
-  }).catch(() => {});
+  }).catch(() => notice("Không thể kết nối để tải báo cáo đã lưu.", true));
 })();

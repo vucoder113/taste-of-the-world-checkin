@@ -1,6 +1,6 @@
 # data-kh-checkin
 
-Trang báo cáo khách tham dự Taste of the World. Chọn bốn file Excel riêng để xem số đăng ký, check-in buổi chiều, khách mời/check-in tiệc tối và kết quả theo nhân viên.
+Trang báo cáo khách tham dự Taste of the World cho Hà Nội và TP. Hồ Chí Minh. Chọn miền để xem báo cáo riêng hoặc mở mục so sánh hai miền.
 
 ## Chạy local
 
@@ -19,18 +19,22 @@ Repository có `render.yaml` để tạo Web Service chạy bằng Gunicorn. T�
 
 Để lấy `DATABASE_URL`, trong Supabase mở **Connect > Connection string**, chọn dạng **URI** và **Transaction pooler**, rồi sao chép URI vào biến `DATABASE_URL` trong Render. Thay placeholder mật khẩu bằng mật khẩu database của dự án Supabase; ứng dụng kết nối qua TLS. Không gửi URI hoặc mật khẩu cho người khác và không lưu chúng vào GitHub. Không cần tạo bảng thủ công: ứng dụng tự tạo schema riêng `app_private` và bảng lưu báo cáo khi kết nối lần đầu; schema và bảng bị thu hồi quyền truy cập công khai.
 
-Sau khi Render triển khai thành công, đăng nhập và tải lên bốn file Excel một lần. Từ đó báo cáo được nạp lại từ Supabase khi website mở hoặc Render khởi động lại. Có thể tải bộ Excel mới lên để thay thế báo cáo đã lưu. File khách mời được lưu trong database Supabase; chỉ dùng dự án và thông tin kết nối được bảo vệ, và chỉ chia sẻ URL/mật khẩu website với người được phép.
+Sau khi Render triển khai thành công, đăng nhập và tải lên bốn file Excel cho từng miền. Báo cáo Hà Nội và TP. Hồ Chí Minh được lưu độc lập, nạp lại từ Supabase khi website mở hoặc Render khởi động lại; tải bộ file mới chỉ thay báo cáo của miền đang chọn. Báo cáo một miền đã lưu từ phiên bản trước được nhận diện là Hà Nội. File khách mời được lưu trong database Supabase; chỉ dùng dự án và thông tin kết nối được bảo vệ, và chỉ chia sẻ URL/mật khẩu website với người được phép.
 
 ## Các file Excel
 
-Trang nhận bốn file `.xlsx` trong cùng một lượt:
+Với từng miền, trang nhận bốn file `.xlsx` trong cùng một lượt:
 
 - Danh sách khách hàng đăng ký tham dự.
 - Danh sách khách check-in buổi chiều (mọi dòng trong file đều là khách đã check-in).
 - Danh sách khách mời tiệc tối.
 - Danh sách chỉ tiêu nhân viên.
 
-Ứng dụng nhận dạng từng file theo tên/cột, kể cả khi tiêu đề bảng nằm dưới dòng tiêu đề lớn. Báo cáo giữ riêng các danh sách, không gộp/deduplicate khách giữa các file. Mọi dòng trong file check-in buổi chiều được tính là khách đã check-in. Số khách tiệc tối được tính theo cột `SL Khách`; check-in tối chỉ tính số lượng ở các dòng có dấu trong cột `Check in`. Dòng thiếu số lượng vẫn hiện trong dữ liệu chi tiết nhưng không bị tự tính thành một khách; trang sẽ cảnh báo số dòng cần rà soát. Nếu file không có thông tin VIP, biểu đồ đánh dấu là “Chưa phân loại”, không tự gán thành không VIP. Có thể mở chi tiết nhân viên hoặc nhóm “Chưa xác định” để xem các trường dữ liệu gốc.
+Ứng dụng nhận dạng từng file theo tên/cột, kể cả khi tiêu đề bảng nằm dưới dòng tiêu đề lớn. Nếu file đăng ký hoặc check-in chiều có cột thành phố, các dòng ghi rõ thuộc miền khác sẽ được loại khỏi báo cáo. Báo cáo giữ riêng các danh sách, không gộp/deduplicate khách giữa các file. Mọi dòng trong file check-in buổi chiều được tính là khách đã check-in. Số khách tiệc tối được tính theo cột `SL Khách`; check-in tối chỉ tính số lượng ở các dòng có dấu trong cột `Check in`. File tiệc tối HCM dùng cột `Tên đại diện`, `SL khách tham dự`, `Số thăm` và `Check-in`; các dòng tiêu đề nhóm không bị tính thành khách. Vì file tiệc tối không có cột người mời, biểu đồ tiệc tối được nhóm theo cột `Kênh`; khách vẫn không bị gán cho nhân viên. Dòng thiếu số lượng vẫn hiện trong dữ liệu chi tiết nhưng không bị tự tính thành một khách; trang sẽ cảnh báo số dòng cần rà soát. Nếu file không có thông tin VIP, biểu đồ đánh dấu là “Chưa phân loại”, không tự gán thành không VIP. Có thể mở chi tiết nhân viên để xem các trường dữ liệu gốc.
+
+Mục “So sánh hai miền” cần có báo cáo của cả Hà Nội và TP. Hồ Chí Minh. Báo cáo đối chiếu số nhân viên trong danh sách target, số đăng ký, check-in chiều, khách mời tối, check-in tối và tỷ lệ check-in tối. Chênh lệch được tính theo `TP. Hồ Chí Minh − Hà Nội`; tỷ lệ check-in tối là `số khách check-in / số khách mời tiệc tối`.
+
+Điều chỉnh tổng check-in tiệc tối HCM qua API sẽ được lưu rõ trong báo cáo cùng lý do, và phần tăng/giảm được hiển thị thành nhóm “Điều chỉnh thủ công”; không tự cộng vào nhân viên hay kênh cụ thể.
 
 Các ô trạng thái trong chi tiết khách được đối chiếu giữa danh sách đăng ký, buổi chiều và tiệc tối theo số điện thoại/email duy nhất; chỉ dùng tên khi tên duy nhất ở cả hai danh sách và thông tin liên hệ không mâu thuẫn. Ô check-in tối dựa trên dấu `Check in` của danh sách tiệc tối. Số liệu tổng hợp theo nhân viên gán tên đầy đủ khớp chính xác hoặc bí danh viết tắt khớp duy nhất với tên/chức vụ trong file Target; “TGĐ”, “TDG” và “Sếp tùng” được quy về ANH TÙNG theo cách ghi trong dữ liệu. Tên không khớp hoặc mơ hồ được cộng vào dòng “Chưa đối chiếu Target”, không tự suy đoán nhân viên. Bảng nhân viên được xếp theo phòng ban rồi theo tên; tỷ lệ tham dự là `(check-in chiều + check-in tối) / max(đăng ký, target)` của từng nhân viên: nếu đăng ký thấp hơn Target thì dùng Target làm mẫu số, nếu không thì dùng số đăng ký. Hiển thị `—` nếu cả đăng ký và Target đều bằng 0.
 
