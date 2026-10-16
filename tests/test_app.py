@@ -362,7 +362,7 @@ class ReportAppTests(unittest.TestCase):
         self.assertIn("CHECK-IN BUỔI CHIỀU", response.get_data(as_text=True))
         self.assertIn("TỶ LỆ THAM DỰ", response.get_data(as_text=True))
         self.assertIn("Chưa đối chiếu Target", response.get_data(as_text=True))
-        self.assertIn("dinner-adjustment-form", response.get_data(as_text=True))
+        self.assertNotIn("dinner-adjustment-form", response.get_data(as_text=True))
 
     def test_reads_four_separate_workbooks_without_merging_lists(self):
         report = report_app.parse_separate_files(make_separate_files())

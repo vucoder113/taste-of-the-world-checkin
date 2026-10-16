@@ -11,9 +11,6 @@
     file: $("#excel-file"), choose: $("#choose-file"), emptyChoose: $("#empty-choose"),
     notice: $("#notice"), empty: $("#empty-state"), dashboard: $("#dashboard"),
     compareDashboard: $("#compare-dashboard"), uploadRegion: $("#upload-region"),
-    dinnerAdjustmentForm: $("#dinner-adjustment-form"),
-    dinnerAdjustmentTotal: $("#dinner-adjustment-total"),
-    dinnerAdjustmentSubmit: $("#dinner-adjustment-submit"),
     chartCategory: $("#chart-category"), vipFilter: $("#vip-filter"), inviterFilter: $("#inviter-filter"),
     chart: $("#chart"), chartEmpty: $("#chart-empty"), chartTotal: $("#chart-total"),
     chartAttribution: $("#chart-attribution"),
@@ -79,49 +76,11 @@
     $("#metric-afternoon").textContent = report.totals.afternoon.toLocaleString("vi-VN");
     $("#metric-dinner-invited").textContent = (report.totals.dinner_invited ?? report.totals.dinner).toLocaleString("vi-VN");
     $("#metric-dinner").textContent = report.totals.dinner.toLocaleString("vi-VN");
-    elements.dinnerAdjustmentForm.hidden = state.view !== "HCM";
-    elements.dinnerAdjustmentTotal.value = report.totals.dinner;
-    const manualAdjustment = report.manual_adjustments?.dinner_checkins;
-    $("#dinner-adjustment-note").textContent = manualAdjustment
-      ? `Đã điều chỉnh ${manualAdjustment.delta > 0 ? "+" : ""}${manualAdjustment.delta} so với file gốc (${manualAdjustment.base_total}). Lưu số gốc để bỏ điều chỉnh. Phần chênh lệch không gán cho kênh hoặc nhân viên cụ thể.`
-      : "Số điều chỉnh sẽ được lưu cùng báo cáo; phần tăng thêm không gán cho kênh hoặc nhân viên cụ thể.";
     renderSourceSummary();
     renderWarnings();
     renderInviters();
     renderChart();
     renderEmployees();
-  }
-
-  async function saveDinnerAdjustment(event) {
-    event.preventDefault();
-    const total = Number(elements.dinnerAdjustmentTotal.value);
-    if (!Number.isSafeInteger(total) || total < 0) {
-      notice("Vui lòng nhập số khách check-in là số nguyên không âm.");
-      return;
-    }
-
-    elements.dinnerAdjustmentSubmit.disabled = true;
-    try {
-      const response = await fetch("/api/report/adjust", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          region: "HCM",
-          dinner_checkins: total,
-          reason: "Điều chỉnh check-in tiệc tối HCM trên dashboard.",
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok || !result.ok) throw new Error(result.message || "Không thể lưu số điều chỉnh.");
-      state.reports = result.reports || { ...state.reports, HCM: result.report };
-      state.view = "HCM";
-      notice(`Đã lưu check-in tiệc tối HCM: ${total.toLocaleString("vi-VN")} khách.`, false);
-      render();
-    } catch (error) {
-      notice(error.message || "Có lỗi khi lưu số điều chỉnh.");
-    } finally {
-      elements.dinnerAdjustmentSubmit.disabled = false;
-    }
   }
 
   function renderComparison() {
@@ -478,7 +437,6 @@
   elements.choose.addEventListener("click", () => elements.file.click());
   elements.emptyChoose.addEventListener("click", () => elements.file.click());
   elements.file.addEventListener("change", () => uploadFile(elements.file.files));
-  elements.dinnerAdjustmentForm.addEventListener("submit", saveDinnerAdjustment);
   document.querySelectorAll(".region-tab").forEach((button) => {
     button.addEventListener("click", () => {
       state.view = button.dataset.view;
