@@ -82,3 +82,4 @@ body{margin:0;min-width:360px}
 .comparison-empty{padding:20px;border-radius:8px;background:#f7f8f5;color:#69736a;font-size:12px;line-height:1.6}
 @media(max-width:900px){.upload-box{flex-wrap:wrap;justify-content:flex-end}.comparison-panel .panel-heading{align-items:start}}
 @media(max-width:600px){.upload-box{justify-content:flex-start}.upload-hint{width:100%}.region-tabs{width:100%;overflow:auto}.region-tab{white-space:nowrap;padding:10px 11px}.comparison-panel{padding:18px 14px}.comparison-panel .panel-heading{flex-direction:column}.comparison-note{max-width:none}}
+@media(max-width:600px){.chart{max-height:none;overflow:visible}.chart-row{grid-template-columns:minmax(0,32%) minmax(0,1fr) 36px;gap:8px}}
